@@ -1,42 +1,69 @@
 
-# Simulation CSE (Client-Side Encryption) System
+# 🛡️ Simulation CSE (Client-Side Encryption) System
 
-This is a final project for the Spring 2025 Cryptography Engineering course. It implements a **Client-Side Encryption (CSE)** simulation system supporting:
+This is the final project for Spring 2025 Cryptography Engineering. It implements a secure **Client-Side Encryption (CSE)** simulation supporting:
 - Multiple users (≥3)
-- Multi-node storage
-- WebCrypto API
-- Key Management System (KMS)
+- WebCrypto API (in-browser AES + RSA)
+- Multi-node encrypted storage
+- Integrated Key Management System (KMS)
 
-## 💡 Features
+---
 
-- 🔐 End-to-end encryption with AES-GCM (256-bit)
-- 🔑 Per-user RSA key pairs (for wrapping/unwrapping AES keys)
-- 🌐 Multi-node storage simulation (`storage_node_*/`)
-- 📦 Upload & Download encrypted files
-- 🧾 File decryption via user private key (unwrapped through KMS)
-- 👥 JWT-based frontend login (optional, stubbed in this version)
+## 🔐 Features
 
-## 🚀 Quick Start
+- AES-GCM 256-bit encryption (generated on client via WebCrypto)
+- Per-user RSA key pairs managed by KMS
+- JWT-based login & user authentication
+- File encryption in browser, decryption after KMS authorization
+- Multi-node storage for encrypted file distribution
+- Automatic key wrapping/unwrapping using RSA-OAEP
+- Upload record support (by file ID)
 
-### Frontend
+---
+
+## 🚀 How to Run
+
+### 1. Install Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+### 2. Start KMS Server
+
+```bash
+python kms.py
+```
+
+### 3. Start Main App Server
+
+```bash
+python app.py
+```
+
+### 4. Start Frontend
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### Backend
-```bash
-cd backend
-pip install -r requirements.txt
-python app.py
-```
+Frontend will run on: `http://localhost:5173`  
+Backend API: `http://localhost:5000`  
+KMS API: `http://localhost:6000`
+
+---
 
 ## 🗂️ Notes
 
-- `.db`, `tokens/`, `users/`, `storage_node_*/` are git-ignored
-- Uses WebCrypto for AES and RSA operations in the browser
-- File IDs are used for download routing
+- `.db`, `tokens/`, `users/`, `kms_keys/`, `storage_node_*/` are git-ignored
+- JWT tokens are stored in `localStorage` and used to authorize unwrap requests
+- All encryption/decryption is done **client-side**
+- Server only stores encrypted content and wrapped session keys
+
+---
 
 ## 📄 License
 

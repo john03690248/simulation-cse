@@ -1,31 +1,16 @@
+
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import os, json, uuid, jwt, datetime
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
+import os, json, uuid, jwt, datetime, requests
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 app.config["SECRET_KEY"] = "supersecret"
 
-# ========== Helper ==========
 def user_path(user_id):
     return os.path.join("users", f"{user_id}.json")
 
-def generate_rsa_keys():
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    priv_bytes = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    pub_bytes = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    return priv_bytes.decode(), pub_bytes.decode()
-
-# ========== API ==========
 @app.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
@@ -33,12 +18,13 @@ def register():
     password = data["password"]
     user_id = str(uuid.uuid4())
 
-    priv_key, pub_key = generate_rsa_keys()
+    kms_res = requests.post("http://localhost:6000/kms/register", json={"user_id": user_id})
+    pub_key = kms_res.json()["publicKey"]
+
     user_data = {
         "id": user_id,
         "username": username,
         "password": password,
-        "private_key": priv_key,
         "public_key": pub_key,
     }
 
@@ -68,7 +54,7 @@ def login():
                 )
                 return jsonify({
                     "token": token,
-                    "id": user["id"]  # ✅ 加上 userId
+                    "id": user["id"]
                 })
     return jsonify({"error": "Invalid credentials"}), 401
 
@@ -82,41 +68,31 @@ def get_public_key(user_id):
         return jsonify({"error": "User not found"}), 404
 
 @app.route("/unwrapKey", methods=["POST"])
-def unwrap_key():
-    data = request.get_json()
-    if not data or "encryptedSessionKey" not in data or not isinstance(data["encryptedSessionKey"], str):
-        return jsonify({"error": "Missing or invalid encryptedSessionKey"}), 400
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+def unwrap_proxy():
+    token = request.headers.get("Authorization", "")
+    encrypted = request.get_json().get("encryptedSessionKey")
+    if not encrypted:
+        return jsonify({"error": "Missing encryptedSessionKey"}), 400
+
     try:
-        payload = jwt.decode(token, app.config["SECRET_KEY"], algorithms=["HS256"])
-        user_id = payload["id"]
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token expired"}), 403
-
-    with open(user_path(user_id), "r") as f:
-        user = json.load(f)
-        private_key = serialization.load_pem_private_key(
-            user["private_key"].encode(), password=None
+        res = requests.post("http://localhost:6000/kms/unwrap",
+            headers={"Authorization": token},
+            json={"encryptedSessionKey": encrypted}
         )
-
-    encrypted_key = bytes.fromhex(data["encryptedSessionKey"])
-    decrypted_key = private_key.decrypt(
-        encrypted_key,
-        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None),
-    )
-
-    return jsonify({"sessionKey": decrypted_key.hex()})
+        return jsonify(res.json())
+    except:
+        return jsonify({"error": "KMS unavailable"}), 503
 
 @app.route("/uploadFile", methods=["POST"])
 def upload_file():
     file = request.files["file"]
     encrypted_key = request.form["encryptedKey"]
-    filename = str(uuid.uuid4()) + "_" + file.filename
+    filename = str(uuid.uuid4()) + "_" + secure_filename(file.filename)
 
     storage_nodes = ["storage_node_1", "storage_node_2"]
     chosen_node = storage_nodes[hash(filename) % len(storage_nodes)]
     filepath = os.path.join(chosen_node, filename)
-
+    os.makedirs(chosen_node, exist_ok=True)
     file.save(filepath)
 
     os.makedirs("tokens", exist_ok=True)
@@ -132,14 +108,13 @@ def download_file(file_id):
         if os.path.exists(path):
             with open(os.path.join("tokens", file_id + ".meta.json")) as f:
                 meta = json.load(f)
-                
+
             response = send_file(path, as_attachment=True)
             response.headers["X-Encrypted-Key"] = meta["encryptedKey"]
             response.headers["Access-Control-Expose-Headers"] = "X-Encrypted-Key"
             return response
     return jsonify({"error": "File not found"}), 404
 
-# ========== Run ==========
 if __name__ == "__main__":
     os.makedirs("users", exist_ok=True)
     os.makedirs("tokens", exist_ok=True)
