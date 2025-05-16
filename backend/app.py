@@ -158,7 +158,23 @@ def all_users():
             })
     return jsonify({"users": users})
 
+@app.route("/myFiles", methods=["GET"])
+def list_accessible_files():
+    user_id = request.headers.get("X-User-ID")
+    if not user_id:
+        return jsonify({"error": "Missing user ID"}), 400
 
+    accessible_files = []
+
+    for filename in os.listdir("tokens"):
+        if filename.endswith(".meta.json"):
+            with open(os.path.join("tokens", filename), "r") as f:
+                meta = json.load(f)
+                if user_id in meta.get("sharedKeys", {}):
+                    file_id = filename.replace(".meta.json", "")
+                    accessible_files.append(file_id)
+
+    return jsonify({"files": accessible_files})
 
 if __name__ == "__main__":
     os.makedirs("users", exist_ok=True)

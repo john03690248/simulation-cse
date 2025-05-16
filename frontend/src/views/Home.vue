@@ -1,28 +1,41 @@
 <template>
   <div class="container">
-    <h2>Simulation CSE - Upload & Download</h2>
-    <button @click="logout" style="float:right;">Logout</button>
-    <input type="file" @change="handleFile" />
+    <h2 class="title">Simulation CSE - Upload & Download</h2>
+    <button @click="logout" class="logout">Logout</button>
+    <div class="section">
+      <input type="file" @change="handleFile" class="file-input" />
 
-    <div style="margin-top: 1rem">
-      <label>Share with:</label>
-      <select v-model="selectedUserId" @change="addToSharedList">
-        <option disabled value="">-- Select user to share --</option>
-        <option v-for="user in availableUsers" :key="user.id" :value="user.id">{{ user.username }}</option>
-      </select>
-      <div>Shared with: {{ sharedList }}</div>
+      <div class="share-section">
+        <label>Share with:</label>
+        <select v-model="selectedUserId" @change="addToSharedList" class="dropdown">
+          <option disabled value="">-- Select user to share --</option>
+          <option v-for="user in availableUsers" :key="user.id" :value="user.id">
+            {{ user.username }}
+          </option>
+        </select>
+        <div>Shared with: {{ sharedList }}</div>
+      </div>
+
+      <button @click="encryptAndUpload" :disabled="!file" class="action-button">Encrypt & Upload</button>
     </div>
-
-    <button @click="encryptAndUpload" :disabled="!file">Encrypt & Upload</button>
 
     <hr />
 
-    <input v-model="downloadId" placeholder="Enter file ID to download" />
-    <button @click="downloadAndDecrypt">Download & Decrypt</button>
+    <div class="section">
+      <h3 class="subtitle">My Accessible Files:</h3>
+      <ul class="file-list">
+        <li v-for="fid in myFiles" :key="fid">📄 {{ fid }}</li>
+      </ul>
+    </div>
 
-    <div v-if="decryptedContent">
-      <h3>Decrypted Content:</h3>
-      <pre>{{ decryptedContent }}</pre>
+    <div class="section">
+      <input v-model="downloadId" placeholder="Enter file ID to download" class="input" />
+      <button @click="downloadAndDecrypt" class="action-button">Download & Decrypt</button>
+    </div>
+
+    <div v-if="decryptedContent" class="section">
+      <h3 class="subtitle">Decrypted Content:</h3>
+      <pre class="output">{{ decryptedContent }}</pre>
     </div>
   </div>
 </template>
@@ -45,6 +58,7 @@ const availableUsers = ref([])
 const selectedUserId = ref('')
 const downloadId = ref('')
 const decryptedContent = ref('')
+const myFiles = ref([])
 
 const handleFile = (e) => {
   file.value = e.target.files[0]
@@ -63,7 +77,18 @@ async function fetchAvailableUsers() {
   availableUsers.value = data.users.filter(u => u.id !== userId)
 }
 
-onMounted(fetchAvailableUsers)
+async function fetchMyFiles() {
+  const res = await fetch('http://localhost:5000/myFiles', {
+    headers: { 'X-User-ID': userId }
+  })
+  const data = await res.json()
+  myFiles.value = data.files || []
+}
+
+onMounted(() => {
+  fetchAvailableUsers()
+  fetchMyFiles()
+})
 
 async function encryptAndUpload() {
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt'])
@@ -87,12 +112,12 @@ async function encryptAndUpload() {
   const { fileId } = await uploadEncryptedFile(blob, encryptedKeys, file.value.name)
 
   alert(`Upload successful. File ID: ${fileId}`)
+  fetchMyFiles()
 }
 
 async function downloadAndDecrypt() {
   try {
     const { fileBlob, encryptedKeyHex } = await downloadEncryptedFile(downloadId.value, userId)
-
     const privatePem = await getPrivateKeyFromKMS(token)
     const rsaPriv = await importRSAPrivateKey(privatePem)
 
@@ -122,7 +147,6 @@ async function downloadAndDecrypt() {
   }
 }
 
-
 function logout() {
   localStorage.removeItem('jwt')
   localStorage.removeItem('userId')
@@ -148,8 +172,70 @@ async function importRSAPrivateKey(pem) {
 
 <style scoped>
 .container {
-  max-width: 600px;
+  max-width: 700px;
   margin: auto;
   padding: 2rem;
+  background: #1e1e1e;
+  color: #eee;
+  font-family: 'Segoe UI', sans-serif;
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.5);
+}
+.title {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+.subtitle {
+  margin-top: 1.5rem;
+}
+.section {
+  margin-top: 1.25rem;
+}
+.logout {
+  float: right;
+  background: #ff4c4c;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.file-input,
+.input,
+.dropdown {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.4rem;
+  width: 100%;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #2b2b2b;
+  color: #fff;
+}
+.action-button {
+  margin-top: 0.75rem;
+  background: #008cff;
+  border: none;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.action-button:disabled {
+  background: #444;
+  cursor: not-allowed;
+}
+.output {
+  background: #333;
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  color: #aff;
+}
+.file-list {
+  list-style: none;
+  padding-left: 1rem;
+  color: #ccc;
 }
 </style>
+
