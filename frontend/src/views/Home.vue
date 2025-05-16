@@ -23,7 +23,7 @@ import {
   getPublicKey,
   uploadEncryptedFile,
   downloadEncryptedFile,
-  unwrapSessionKey
+  getPrivateKeyFromKMS
 } from '../api.js'
 
 const userId = localStorage.getItem('userId')
@@ -57,13 +57,18 @@ async function encryptAndUpload() {
 
 async function downloadAndDecrypt() {
   const { fileBlob, encryptedKeyHex } = await downloadEncryptedFile(downloadId.value)
-  console.log('🔍 EncryptedKeyHex:', encryptedKeyHex)
-  const decryptedKeyHex = await unwrapSessionKey(encryptedKeyHex, token)
-  const rawKey = hexToBytes(decryptedKeyHex)
-  
-  const aesKey = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt'])
-  const arrayBuffer = await fileBlob.arrayBuffer()
 
+  const privatePem = await getPrivateKeyFromKMS(token)
+  const rsaPriv = await importRSAPrivateKey(privatePem)
+
+  const decryptedKey = await crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    rsaPriv,
+    hexToBytes(encryptedKeyHex)
+  )
+  const aesKey = await crypto.subtle.importKey('raw', decryptedKey, { name: 'AES-GCM' }, false, ['decrypt'])
+
+  const arrayBuffer = await fileBlob.arrayBuffer()
   const iv = new Uint8Array(arrayBuffer.slice(0, 12))
   const ciphertext = arrayBuffer.slice(12)
 
@@ -73,14 +78,9 @@ async function downloadAndDecrypt() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'decrypted_' + downloadId.value.split('_').slice(1).join('_') // 取原始檔名
+  a.download = 'decrypted_' + downloadId.value.split('_').slice(1).join('_')
   a.click()
   URL.revokeObjectURL(url)
-
-}
-
-function hexToBytes(hex) {
-  return new Uint8Array(hex.match(/.{1,2}/g).map((b) => parseInt(b, 16)))
 }
 
 function logout() {
@@ -89,10 +89,20 @@ function logout() {
   window.location.reload()
 }
 
+function hexToBytes(hex) {
+  return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)))
+}
+
 async function importRSAPublicKey(pem) {
   const b64 = pem.replace(/-----(BEGIN|END) PUBLIC KEY-----/g, '').replace(/\s/g, '')
-  const der = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  const der = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
   return await crypto.subtle.importKey('spki', der.buffer, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt'])
+}
+
+async function importRSAPrivateKey(pem) {
+  const b64 = pem.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, '').replace(/\s/g, '')
+  const der = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+  return await crypto.subtle.importKey('pkcs8', der.buffer, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['decrypt'])
 }
 </script>
 
