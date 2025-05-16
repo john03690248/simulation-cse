@@ -1,11 +1,14 @@
-
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os, json, uuid, jwt, datetime, requests
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, 
+     resources={r"/*": {"origins": "*"}},
+     supports_credentials=True,
+     expose_headers=["X-Encrypted-Key"],
+     allow_headers=["Content-Type", "Authorization", "X-User-ID"])
 app.config["SECRET_KEY"] = "supersecret"
 
 def user_path(user_id):
@@ -13,26 +16,30 @@ def user_path(user_id):
 
 @app.route("/register", methods=["POST"])
 def register():
-    data = request.get_json()
-    username = data["username"]
-    password = data["password"]
-    user_id = str(uuid.uuid4())
+    try:
+        data = request.get_json()
+        username = data["username"]
+        password = data["password"]
+        user_id = str(uuid.uuid4())
 
-    kms_res = requests.post("http://localhost:6000/kms/register", json={"user_id": user_id})
-    pub_key = kms_res.json()["publicKey"]
+        kms_res = requests.post("http://localhost:7000/kms/register", json={"user_id": user_id})
+        pub_key = kms_res.json()["publicKey"]
 
-    user_data = {
-        "id": user_id,
-        "username": username,
-        "password": password,
-        "public_key": pub_key,
-    }
+        user_data = {
+            "id": user_id,
+            "username": username,
+            "password": password,
+            "public_key": pub_key,
+        }
 
-    os.makedirs("users", exist_ok=True)
-    with open(user_path(user_id), "w") as f:
-        json.dump(user_data, f)
+        os.makedirs("users", exist_ok=True)
+        with open(user_path(user_id), "w") as f:
+            json.dump(user_data, f)
 
-    return jsonify({"id": user_id})
+        return jsonify({"id": user_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -75,7 +82,7 @@ def unwrap_proxy():
         return jsonify({"error": "Missing encryptedSessionKey"}), 400
 
     try:
-        res = requests.post("http://localhost:6000/kms/unwrap",
+        res = requests.post("http://localhost:7000/kms/unwrap",
             headers={"Authorization": token},
             json={"encryptedSessionKey": encrypted}
         )
@@ -86,7 +93,9 @@ def unwrap_proxy():
 @app.route("/uploadFile", methods=["POST"])
 def upload_file():
     file = request.files["file"]
-    encrypted_key = request.form["encryptedKey"]
+    encrypted_keys_json = request.form["encryptedKeys"]
+    encrypted_keys = json.loads(encrypted_keys_json)
+
     filename = str(uuid.uuid4()) + "_" + secure_filename(file.filename)
 
     storage_nodes = ["storage_node_1", "storage_node_2"]
@@ -96,24 +105,60 @@ def upload_file():
     file.save(filepath)
 
     os.makedirs("tokens", exist_ok=True)
+    metadata = {
+        "owner": list(encrypted_keys.keys())[0],
+        "sharedKeys": encrypted_keys
+    }
+
     with open(os.path.join("tokens", filename + ".meta.json"), "w") as f:
-        json.dump({"encryptedKey": encrypted_key}, f)
+        json.dump(metadata, f)
 
     return jsonify({"fileId": filename})
 
 @app.route("/downloadFile/<file_id>", methods=["GET"])
 def download_file(file_id):
+    user_id = request.headers.get("X-User-ID")
+    if not user_id:
+        return jsonify({"error": "Missing user ID"}), 400
+
     for node in ["storage_node_1", "storage_node_2"]:
         path = os.path.join(node, file_id)
         if os.path.exists(path):
             with open(os.path.join("tokens", file_id + ".meta.json")) as f:
                 meta = json.load(f)
 
+            encrypted_key = meta["sharedKeys"].get(user_id)
+            if not encrypted_key:
+                return jsonify({"error": "Permission denied"}), 403
+
             response = send_file(path, as_attachment=True)
-            response.headers["X-Encrypted-Key"] = meta["encryptedKey"]
+            response.headers["X-Encrypted-Key"] = encrypted_key
             response.headers["Access-Control-Expose-Headers"] = "X-Encrypted-Key"
             return response
+
     return jsonify({"error": "File not found"}), 404
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-ID'
+    response.headers['Access-Control-Expose-Headers'] = 'X-Encrypted-Key'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
+
+@app.route("/allUsers", methods=["GET"])
+def all_users():
+    users = []
+    for filename in os.listdir("users"):
+        with open(os.path.join("users", filename), "r") as f:
+            user = json.load(f)
+            users.append({
+                "id": user["id"],
+                "username": user["username"]
+            })
+    return jsonify({"users": users})
+
+
 
 if __name__ == "__main__":
     os.makedirs("users", exist_ok=True)
