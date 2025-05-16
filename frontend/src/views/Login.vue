@@ -29,7 +29,7 @@ async function register() {
     const data = await res.json()
     if (data.id) {
       localStorage.setItem('userId', data.id)
-      await login()  // 註冊後自動登入
+      await login()
     } else {
       error.value = data.error || 'Registration failed'
     }
@@ -50,7 +50,6 @@ async function login() {
     if (data.token) {
       localStorage.setItem('jwt', data.token)
       localStorage.setItem('userId', data.id)
-      // 跳轉到 Home（App.vue 控制）
       window.location.reload()
     } else {
       error.value = data.error || 'Login failed'
