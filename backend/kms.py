@@ -52,5 +52,5 @@ def get_private_key():
 
 if __name__ == "__main__":
     os.makedirs("kms_keys", exist_ok=True)
-    app.run(host="0.0.0.0", port=7000, debug=True)  # ✅ 換成 7000 或 9000
+    app.run(host="0.0.0.0", port=7000, debug=True)
 

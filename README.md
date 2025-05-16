@@ -52,7 +52,7 @@ npm run dev
 
 Frontend will run on: `http://localhost:5173`  
 Backend API: `http://localhost:5000`  
-KMS API: `http://localhost:6000`
+KMS API: `http://localhost:7000`
 
 ---
 
