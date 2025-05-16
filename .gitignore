@@ -9,3 +9,4 @@ storage_node_*/
 node_modules/
 dist/
 .env
+kms_keys
