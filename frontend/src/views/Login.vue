@@ -3,10 +3,21 @@
     <h2>Login / Register</h2>
     <input v-model="username" placeholder="Username" />
     <input v-model="password" type="password" placeholder="Password" />
-    <div class="buttons">
-      <button @click="register">Register</button>
-      <button @click="login">Login</button>
+
+    <!-- 顯示 OTP 欄位（第二階段） -->
+    <input v-if="needsOtp" v-model="otp" placeholder="Enter OTP" />
+
+    <!-- 顯示 QR Code（註冊後） -->
+    <div v-if="qrCodeUrl" class="qrcode">
+      <p>Scan this QR code with your Authenticator app:</p>
+      <img :src="qrCodeUrl" alt="TOTP QR Code" />
     </div>
+
+    <div class="buttons">
+      <button @click="register" :disabled="needsOtp">Register</button>
+      <button @click="handleLogin">{{ needsOtp ? 'Verify OTP' : 'Login' }}</button>
+    </div>
+
     <p v-if="error">{{ error }}</p>
   </div>
 </template>
@@ -16,7 +27,11 @@ import { ref } from 'vue'
 
 const username = ref('')
 const password = ref('')
+const otp = ref('')
+const userId = ref('')
 const error = ref('')
+const needsOtp = ref(false)
+const qrCodeUrl = ref('')
 
 async function register() {
   error.value = ''
@@ -28,8 +43,10 @@ async function register() {
     })
     const data = await res.json()
     if (data.id) {
+      userId.value = data.id
       localStorage.setItem('userId', data.id)
-      await login()
+      qrCodeUrl.value = `http://localhost:5000/totp_qrcode/${data.id}`
+      await handleLogin()
     } else {
       error.value = data.error || 'Registration failed'
     }
@@ -38,24 +55,49 @@ async function register() {
   }
 }
 
-async function login() {
+async function handleLogin() {
   error.value = ''
-  try {
-    const res = await fetch('http://localhost:5000/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value, password: password.value }),
-    })
-    const data = await res.json()
-    if (data.token) {
-      localStorage.setItem('jwt', data.token)
-      localStorage.setItem('userId', data.id)
-      window.location.reload()
-    } else {
-      error.value = data.error || 'Login failed'
+
+  if (!needsOtp.value) {
+    try {
+      const res = await fetch('http://localhost:5000/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.value, password: password.value }),
+      })
+      const data = await res.json()
+      if (data.message === 'TOTP required') {
+        needsOtp.value = true
+        userId.value = data.id
+      } else if (data.token) {
+        localStorage.setItem('jwt', data.token)
+        localStorage.setItem('userId', data.id)
+        window.location.reload()
+      } else {
+        error.value = data.error || 'Login failed'
+      }
+    } catch (e) {
+      error.value = 'Login error'
     }
-  } catch (e) {
-    error.value = 'Login error'
+
+  } else {
+    try {
+      const res = await fetch('http://localhost:5000/verify2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId.value, otp: otp.value }),
+      })
+      const data = await res.json()
+      if (data.token) {
+        localStorage.setItem('jwt', data.token)
+        localStorage.setItem('userId', data.id)
+        window.location.reload()
+      } else {
+        error.value = data.error || 'OTP verification failed'
+      }
+    } catch (e) {
+      error.value = 'OTP verification error'
+    }
   }
 }
 </script>
@@ -78,6 +120,15 @@ input {
 }
 button {
   flex: 1;
+  padding: 0.5rem;
+}
+.qrcode {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+.qrcode img {
+  max-width: 200px;
+  border: 1px solid #ccc;
   padding: 0.5rem;
 }
 </style>

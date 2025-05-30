@@ -2,6 +2,9 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os, json, uuid, jwt, datetime, requests
 from werkzeug.utils import secure_filename
+import pyotp
+from io import BytesIO
+import qrcode
 
 app = Flask(__name__)
 CORS(app, 
@@ -25,11 +28,14 @@ def register():
         kms_res = requests.post("http://localhost:7000/kms/register", json={"user_id": user_id})
         pub_key = kms_res.json()["publicKey"]
 
+        totp_secret = pyotp.random_base32()
+        
         user_data = {
             "id": user_id,
             "username": username,
             "password": password,
             "public_key": pub_key,
+            "totp_secret": totp_secret
         }
 
         os.makedirs("users", exist_ok=True)
@@ -51,19 +57,64 @@ def login():
         with open(os.path.join("users", filename), "r") as f:
             user = json.load(f)
             if user["username"] == username and user["password"] == password:
-                token = jwt.encode(
-                    {
-                        "id": user["id"],
-                        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=3),
-                    },
-                    app.config["SECRET_KEY"],
-                    algorithm="HS256",
-                )
                 return jsonify({
-                    "token": token,
+                    "message": "TOTP required",
                     "id": user["id"]
                 })
     return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route("/verify2fa", methods=["POST"])
+def verify_2fa():
+    data = request.get_json()
+    user_id = data.get("id")
+    otp = data.get("otp")
+
+    if not user_id or not otp:
+        return jsonify({"error": "Missing id or otp"}), 400
+
+    try:
+        with open(user_path(user_id), "r") as f:
+            user = json.load(f)
+
+        totp = pyotp.TOTP(user["totp_secret"])
+        if totp.verify(otp):
+            token = jwt.encode(
+                {
+                    "id": user_id,
+                    "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=3),
+                },
+                app.config["SECRET_KEY"],
+                algorithm="HS256"
+            )
+            return jsonify({"token": token, "id": user_id})
+        else:
+            return jsonify({"error": "Invalid OTP"}), 403
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/totp_qrcode/<user_id>", methods=["GET"])
+def get_totp_qrcode(user_id):
+    try:
+        with open(user_path(user_id), "r") as f:
+            user = json.load(f)
+
+        totp_secret = user.get("totp_secret")
+        if not totp_secret:
+            return jsonify({"error": "TOTP not set"}), 404
+
+        totp_uri = pyotp.TOTP(totp_secret).provisioning_uri(
+            name=user["username"],
+            issuer_name="SecureFileApp"
+        )
+        
+        img = qrcode.make(totp_uri)
+        buf = BytesIO()
+        img.save(buf)
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/publicKey/<user_id>", methods=["GET"])
 def get_public_key(user_id):
