@@ -4,10 +4,8 @@
     <input v-model="username" placeholder="Username" />
     <input v-model="password" type="password" placeholder="Password" />
 
-    <!-- 顯示 OTP 欄位（第二階段） -->
     <input v-if="needsOtp" v-model="otp" placeholder="Enter OTP" />
 
-    <!-- 顯示 QR Code（註冊後） -->
     <div v-if="qrCodeUrl" class="qrcode">
       <p>Scan this QR code with your Authenticator app:</p>
       <img :src="qrCodeUrl" alt="TOTP QR Code" />
