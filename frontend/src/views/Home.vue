@@ -13,7 +13,16 @@
             {{ user.username }}
           </option>
         </select>
-        <div>Shared with: {{ sharedList }}</div>
+
+        <div>
+          Shared with:
+          <ul>
+            <li v-for="user in sharedList" :key="user.id">
+              {{ user.username }}
+              <button @click="removeFromSharedList(user.id)">❌</button>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <button @click="encryptAndUpload" :disabled="!file" class="action-button">Encrypt & Upload</button>
@@ -65,10 +74,15 @@ const handleFile = (e) => {
 }
 
 function addToSharedList() {
-  if (selectedUserId.value && !sharedList.value.includes(selectedUserId.value)) {
-    sharedList.value.push(selectedUserId.value)
+  const user = availableUsers.value.find(u => u.id === selectedUserId.value)
+  if (user && !sharedList.value.some(u => u.id === user.id)) {
+    sharedList.value.push(user)
   }
   selectedUserId.value = ''
+}
+
+function removeFromSharedList(id) {
+  sharedList.value = sharedList.value.filter(u => u.id !== id)
 }
 
 async function fetchAvailableUsers() {
@@ -98,14 +112,17 @@ async function encryptAndUpload() {
   const encryptedData = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, fileData)
   const rawKey = await crypto.subtle.exportKey('raw', aesKey)
 
-  if (!sharedList.value.includes(userId)) sharedList.value.push(userId)
+  if (!sharedList.value.some(u => u.id === userId)) {
+    const self = availableUsers.value.find(u => u.id === userId) || { id: userId, username: 'Me' }
+    sharedList.value.push(self)
+  }
 
   const encryptedKeys = {}
-  for (const uid of sharedList.value) {
-    const pem = await getPublicKey(uid)
+  for (const user of sharedList.value) {
+    const pem = await getPublicKey(user.id)
     const rsaKey = await importRSAPublicKey(pem)
     const encKey = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaKey, rawKey)
-    encryptedKeys[uid] = [...new Uint8Array(encKey)].map(b => b.toString(16).padStart(2, '0')).join('')
+    encryptedKeys[user.id] = [...new Uint8Array(encKey)].map(b => b.toString(16).padStart(2, '0')).join('')
   }
 
   const blob = new Blob([iv, new Uint8Array(encryptedData)], { type: 'application/octet-stream' })
@@ -113,6 +130,8 @@ async function encryptAndUpload() {
 
   alert(`Upload successful. File ID: ${fileId}`)
   fetchMyFiles()
+  sharedList.value = []
+  file.value = null
 }
 
 async function downloadAndDecrypt() {
@@ -238,4 +257,3 @@ async function importRSAPrivateKey(pem) {
   color: #ccc;
 }
 </style>
-
